@@ -4,33 +4,33 @@ import mediapipe as mp
 import numpy as np
 import tempfile
 import os
-import gc  # Garbage collection
 
-# Configure Streamlit for better performance
+# Configure Streamlit
 st.set_page_config(
     page_title="Elbow Angle Analysis",
     page_icon="💪",
-    layout="wide",
-    initial_sidebar_state="collapsed"  # Save space
+    layout="wide"
 )
 
 class ElbowAngleAnalyzer:
     def __init__(self):
         try:
-            # Initialize MediaPipe with lighter settings
+            # Initialize MediaPipe (0.9.1 compatible)
             self.mp_pose = mp.solutions.pose
             self.mp_drawing = mp.solutions.drawing_utils
-            self.mp_drawing_styles = mp.solutions.drawing_styles
             
-            # Optimized pose detection settings
+            # Initialize pose detection with 0.9.1 compatible settings
             self.pose = self.mp_pose.Pose(
                 static_image_mode=False,
-                model_complexity=0,  # Reduced from 1 to 0 for speed
+                model_complexity=1,
+                smooth_landmarks=True,
                 enable_segmentation=False,
+                smooth_segmentation=True,
                 min_detection_confidence=0.5,
                 min_tracking_confidence=0.5
             )
             self.initialized = True
+            
         except Exception as e:
             st.error(f"Failed to initialize MediaPipe: {str(e)}")
             self.initialized = False
@@ -90,45 +90,29 @@ class ElbowAngleAnalyzer:
         except Exception as e:
             return None, None
     
-    def process_frame(self, frame, resize_factor=0.5):
-        """Process frame with optional resizing for performance"""
+    def process_frame(self, frame):
+        """Process frame and return annotated frame with elbow angles"""
         if not self.initialized:
             return frame, None, None
             
         try:
-            # Resize frame for faster processing
-            if resize_factor < 1.0:
-                height, width = frame.shape[:2]
-                new_width = int(width * resize_factor)
-                new_height = int(height * resize_factor)
-                resized_frame = cv2.resize(frame, (new_width, new_height))
-            else:
-                resized_frame = frame
-            
             # Convert BGR to RGB
-            rgb_frame = cv2.cvtColor(resized_frame, cv2.COLOR_BGR2RGB)
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             
             # Process with MediaPipe
             results = self.pose.process(rgb_frame)
             
-            # Create annotated frame (use original size)
+            # Create annotated frame
             annotated_frame = frame.copy()
             left_angle = None
             right_angle = None
             
             if results.pose_landmarks:
-                # Scale landmarks back to original size if needed
-                if resize_factor < 1.0:
-                    for landmark in results.pose_landmarks.landmark:
-                        landmark.x = landmark.x
-                        landmark.y = landmark.y
-                
-                # Draw pose landmarks
+                # Draw pose landmarks (0.9.1 compatible)
                 self.mp_drawing.draw_landmarks(
                     annotated_frame,
                     results.pose_landmarks,
-                    self.mp_pose.POSE_CONNECTIONS,
-                    landmark_drawing_spec=self.mp_drawing_styles.get_default_pose_landmarks_style()
+                    self.mp_pose.POSE_CONNECTIONS
                 )
                 
                 # Calculate elbow angles
@@ -138,22 +122,18 @@ class ElbowAngleAnalyzer:
                 h, w, _ = annotated_frame.shape
                 
                 if left_angle is not None:
-                    cv2.putText(annotated_frame, f'Left: {left_angle:.1f}°', 
+                    cv2.putText(annotated_frame, f'Left Elbow: {left_angle:.1f}°', 
                                (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
                 else:
-                    cv2.putText(annotated_frame, 'Left: Not detected', 
+                    cv2.putText(annotated_frame, 'Left Elbow: Not detected', 
                                (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
                 
                 if right_angle is not None:
-                    cv2.putText(annotated_frame, f'Right: {right_angle:.1f}°', 
+                    cv2.putText(annotated_frame, f'Right Elbow: {right_angle:.1f}°', 
                                (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
                 else:
-                    cv2.putText(annotated_frame, 'Right: Not detected', 
+                    cv2.putText(annotated_frame, 'Right Elbow: Not detected', 
                                (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-            
-            # Clean up
-            del rgb_frame, resized_frame
-            gc.collect()
             
             return cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB), left_angle, right_angle
             
@@ -162,7 +142,7 @@ class ElbowAngleAnalyzer:
             return frame, None, None
     
     def get_video_info(self, video_path):
-        """Get video information with size limits"""
+        """Get video information"""
         try:
             cap = cv2.VideoCapture(video_path)
             if not cap.isOpened():
@@ -173,10 +153,6 @@ class ElbowAngleAnalyzer:
             width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             cap.release()
-            
-            # Warn about large videos
-            if frame_count > 1000:
-                st.warning(f"⚠️ Large video detected ({frame_count} frames). Consider using batch processing sparingly.")
             
             return frame_count, fps, width, height
         except Exception as e:
@@ -198,45 +174,21 @@ class ElbowAngleAnalyzer:
             st.error(f"Error getting frame: {str(e)}")
             return None
 
-@st.cache_data(max_entries=50)  # Cache processed frames
-def cached_process_frame(analyzer, video_path, frame_number):
-    """Cache processed frames to avoid recomputation"""
-    frame = analyzer.get_frame_at_position(video_path, frame_number)
-    if frame is not None:
-        return analyzer.process_frame(frame, resize_factor=0.7)  # Slightly reduced for speed
-    return None, None, None
-
 def main():
     st.title("💪 Elbow Angle Analysis with MediaPipe")
     st.markdown("*Upload a video to analyze left and right elbow angles frame by frame*")
     
-    # Resource usage warning
-    with st.expander("📋 Performance Tips", expanded=False):
-        st.markdown("""
-        **For best performance on Streamlit Cloud:**
-        - Use videos under 30 seconds when possible
-        - Process frames individually rather than batch processing
-        - Avoid processing every frame in large videos
-        - Consider downsampling (every 5th or 10th frame)
-        """)
-    
-    # Check OpenCV version
-    st.sidebar.info(f"OpenCV: {cv2.__version__}")
-    
-    # Performance settings
-    st.sidebar.subheader("⚙️ Performance Settings")
-    processing_quality = st.sidebar.selectbox(
-        "Processing Quality",
-        ["Fast (Lower Quality)", "Balanced", "High Quality"],
-        index=1
-    )
-    
-    resize_factors = {"Fast (Lower Quality)": 0.5, "Balanced": 0.7, "High Quality": 1.0}
-    resize_factor = resize_factors[processing_quality]
+    # Show version info
+    with st.expander("📊 System Information"):
+        st.info(f"OpenCV Version: {cv2.__version__}")
+        st.info(f"MediaPipe Version: {mp.__version__}")
+        st.info(f"NumPy Version: {np.__version__}")
     
     # Initialize session state
     if 'analyzer' not in st.session_state:
-        st.session_state.analyzer = ElbowAngleAnalyzer()
+        with st.spinner("Initializing MediaPipe..."):
+            st.session_state.analyzer = ElbowAngleAnalyzer()
+    
     if 'video_loaded' not in st.session_state:
         st.session_state.video_loaded = False
     if 'angle_data' not in st.session_state:
@@ -245,13 +197,16 @@ def main():
     # Check if analyzer initialized properly
     if not st.session_state.analyzer.initialized:
         st.error("❌ MediaPipe failed to initialize. Please try refreshing the page.")
+        st.info("💡 If the problem persists, check the logs for more details.")
         return
+    else:
+        st.success("✅ MediaPipe initialized successfully!")
     
-    # File upload with size limit warning
+    # File upload
     uploaded_file = st.file_uploader(
         "Upload Video File",
         type=['mp4', 'avi', 'mov', 'mkv'],
-        help="Upload a video to analyze elbow angles (recommended: under 50MB)"
+        help="Upload a video to analyze elbow angles"
     )
     
     if uploaded_file is not None:
@@ -287,10 +242,14 @@ def main():
             with col4:
                 st.metric("Resolution", f"{width}x{height}")
             
+            # Performance warning for large videos
+            if frame_count > 1000:
+                st.warning(f"⚠️ Large video detected ({frame_count} frames). Consider processing every Nth frame for better performance.")
+            
             # Frame navigation
             st.subheader("🎬 Frame Navigation")
             
-            # Current frame selector with session state
+            # Current frame selector
             if 'current_frame' not in st.session_state:
                 st.session_state.current_frame = 0
             
@@ -341,15 +300,13 @@ def main():
             col1, col2 = st.columns([3, 1])
             
             with col1:
-                # Use cached processing for better performance
+                # Check if frame is already processed
                 if current_frame not in st.session_state.angle_data:
                     with st.spinner("Processing frame..."):
                         frame = st.session_state.analyzer.get_frame_at_position(st.session_state.video_path, current_frame)
                         
                         if frame is not None:
-                            annotated_frame, left_angle, right_angle = st.session_state.analyzer.process_frame(
-                                frame, resize_factor=resize_factor
-                            )
+                            annotated_frame, left_angle, right_angle = st.session_state.analyzer.process_frame(frame)
                             
                             # Store processed data
                             st.session_state.angle_data[current_frame] = {
@@ -403,29 +360,43 @@ def main():
                     else:
                         st.warning("Right elbow not detected")
                 
-                # Simplified batch processing
-                st.subheader("⚡ Sample Processing")
-                sample_step = st.selectbox(
-                    "Sample Every Nth Frame",
+                # Angle interpretation guide
+                with st.expander("📊 Angle Guide"):
+                    st.markdown("""
+                    **Elbow Angle Guidelines:**
+                    - **180°**: Fully extended arm
+                    - **90°**: Right angle bend
+                    - **< 90°**: Deep flexion
+                    - **> 90°**: Partial extension
+                    
+                    *Angles closer to 0° indicate maximum flexion*
+                    """)
+                
+                # Batch processing option
+                st.subheader("⚡ Batch Processing")
+                
+                # Processing options
+                processing_step = st.selectbox(
+                    "Process Every Nth Frame",
                     [1, 5, 10, 30],
                     index=2,
-                    help="Process fewer frames for speed"
+                    help="Higher values = faster processing, fewer data points"
                 )
                 
-                if st.button("🔄 Process Sample Frames", use_container_width=True):
+                if st.button("🔄 Process Frames", use_container_width=True):
                     progress_bar = st.progress(0)
                     status_text = st.empty()
                     
-                    sample_frames = list(range(0, frame_count, sample_step))
+                    # Calculate frames to process
+                    frames_to_process = list(range(0, frame_count, processing_step))
+                    total_frames = len(frames_to_process)
                     
-                    for i, frame_num in enumerate(sample_frames):
+                    for i, frame_num in enumerate(frames_to_process):
                         if frame_num not in st.session_state.angle_data:
                             frame = st.session_state.analyzer.get_frame_at_position(st.session_state.video_path, frame_num)
                             
                             if frame is not None:
-                                annotated_frame, left_angle, right_angle = st.session_state.analyzer.process_frame(
-                                    frame, resize_factor=resize_factor
-                                )
+                                annotated_frame, left_angle, right_angle = st.session_state.analyzer.process_frame(frame)
                                 
                                 st.session_state.angle_data[frame_num] = {
                                     'annotated_frame': annotated_frame,
@@ -433,42 +404,58 @@ def main():
                                     'right_angle': right_angle
                                 }
                         
-                        progress = i / len(sample_frames)
+                        # Update progress
+                        progress = (i + 1) / total_frames
                         progress_bar.progress(progress)
-                        status_text.text(f"Processing frame {frame_num}/{frame_count}")
+                        status_text.text(f"Processing frame {frame_num}/{frame_count} ({i+1}/{total_frames})")
                     
                     progress_bar.progress(1.0)
-                    st.success(f"✅ Processed {len(sample_frames)} frames!")
+                    status_text.text("✅ Processing complete!")
                 
                 # Export data
-                if st.session_state.angle_data and st.button("📊 Export Angle Data", use_container_width=True):
-                    # Create export data
-                    export_data = []
-                    for frame_num in sorted(st.session_state.angle_data.keys()):
-                        data = st.session_state.angle_data[frame_num]
-                        export_data.append({
-                            'frame': frame_num,
-                            'time_seconds': frame_num / fps if fps > 0 else 0,
-                            'left_elbow_angle': data['left_angle'],
-                            'right_elbow_angle': data['right_angle']
-                        })
+                if st.session_state.angle_data:
+                    st.subheader("📊 Export Data")
                     
-                    # Display as text for copying
-                    export_text = "Frame,Time(s),Left_Elbow,Right_Elbow\n"
-                    for data in export_data:
-                        left_angle = f"{data['left_elbow_angle']:.1f}" if data['left_elbow_angle'] is not None else "N/A"
-                        right_angle = f"{data['right_elbow_angle']:.1f}" if data['right_elbow_angle'] is not None else "N/A"
-                        export_text += f"{data['frame']},{data['time_seconds']:.3f},{left_angle},{right_angle}\n"
+                    if st.button("📥 Prepare Export Data", use_container_width=True):
+                        # Create export data
+                        export_data = []
+                        for frame_num in sorted(st.session_state.angle_data.keys()):
+                            data = st.session_state.angle_data[frame_num]
+                            export_data.append({
+                                'frame': frame_num,
+                                'time_seconds': frame_num / fps if fps > 0 else 0,
+                                'left_elbow_angle': data['left_angle'],
+                                'right_elbow_angle': data['right_angle']
+                            })
+                        
+                        # Create CSV content
+                        export_text = "Frame,Time(s),Left_Elbow,Right_Elbow\n"
+                        for data in export_data:
+                            left_angle = f"{data['left_elbow_angle']:.1f}" if data['left_elbow_angle'] is not None else "N/A"
+                            right_angle = f"{data['right_elbow_angle']:.1f}" if data['right_elbow_angle'] is not None else "N/A"
+                            export_text += f"{data['frame']},{data['time_seconds']:.3f},{left_angle},{right_angle}\n"
+                        
+                        # Store in session state for download
+                        st.session_state.export_data = export_text
+                        st.success(f"✅ Export data prepared! {len(export_data)} frames ready.")
                     
-                    st.download_button(
-                        label="📥 Download CSV",
-                        data=export_text,
-                        file_name="elbow_angles.csv",
-                        mime="text/csv"
-                    )
+                    # Download button
+                    if 'export_data' in st.session_state:
+                        st.download_button(
+                            label="📁 Download CSV File",
+                            data=st.session_state.export_data,
+                            file_name=f"elbow_angles_{uploaded_file.name}.csv",
+                            mime="text/csv",
+                            use_container_width=True
+                        )
+                        
+                        # Preview data
+                        with st.expander("👀 Preview Export Data"):
+                            st.text(st.session_state.export_data[:500] + "..." if len(st.session_state.export_data) > 500 else st.session_state.export_data)
         
         except Exception as e:
             st.error(f"Error processing video: {str(e)}")
+            st.info("💡 Try uploading a different video file or refresh the page.")
     
     else:
         # Instructions when no video loaded
@@ -478,19 +465,34 @@ def main():
         1. **📤 Upload Video**: Choose any video file with visible arm movements
         2. **🎬 Navigate Frames**: Use slider and controls to move through the video
         3. **📐 View Angles**: See real-time left and right elbow angles
-        4. **⚡ Sample Process**: Analyze selected frames for efficiency
-        5. **📊 Export Data**: Download angle measurements as CSV
+        4. **⚡ Batch Process**: Analyze multiple frames for complete dataset
+        5. **📊 Export Data**: Download angle measurements as CSV file
         
         ### 🎯 Best Results:
-        - **Videos under 30 seconds** for responsive processing
-        - **Clear view** of both arms
+        - **Clear view** of both arms in the video
         - **Good lighting** and contrast
-        - **Side or front view** of subject
+        - **Side or front view** of the subject
+        - **Visible shoulder, elbow, wrist** landmarks
+        - **Videos under 2 minutes** for optimal performance
+        
+        ### 📐 Angle Calculation:
+        - Uses **shoulder-elbow-wrist** landmarks
+        - **MediaPipe pose estimation** for accurate tracking
+        - **Real-time processing** with visual feedback
+        - **180° = fully extended**, **0° = maximum flexion**
+        
+        ### 💡 Applications:
+        - **Exercise form analysis**
+        - **Physical therapy assessment**
+        - **Sports biomechanics**
+        - **Movement pattern analysis**
+        - **Rehabilitation progress tracking**
         
         ### ⚡ Performance Tips:
-        - Use **"Fast"** quality for quick previews
-        - Process **sample frames** instead of all frames
-        - **Smaller video files** work better on Streamlit Cloud
+        - Use **smaller video files** when possible
+        - Process **every 5th or 10th frame** for large videos
+        - **Individual frame analysis** is faster than batch processing
+        - **Refresh the page** if you encounter any issues
         """)
 
 if __name__ == "__main__":
