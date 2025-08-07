@@ -480,19 +480,6 @@ def main():
         - **MediaPipe pose estimation** for accurate tracking
         - **Real-time processing** with visual feedback
         - **180° = fully extended**, **0° = maximum flexion**
-        
-        ### 💡 Applications:
-        - **Exercise form analysis**
-        - **Physical therapy assessment**
-        - **Sports biomechanics**
-        - **Movement pattern analysis**
-        - **Rehabilitation progress tracking**
-        
-        ### ⚡ Performance Tips:
-        - Use **smaller video files** when possible
-        - Process **every 5th or 10th frame** for large videos
-        - **Individual frame analysis** is faster than batch processing
-        - **Refresh the page** if you encounter any issues
         """)
 
 if __name__ == "__main__":
