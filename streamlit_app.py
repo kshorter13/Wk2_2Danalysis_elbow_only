@@ -193,6 +193,8 @@ def main():
         st.session_state.video_loaded = False
     if 'angle_data' not in st.session_state:
         st.session_state.angle_data = {}
+    if 'current_frame_to_analyze' not in st.session_state:
+        st.session_state.current_frame_to_analyze = 0
     
     # Check if analyzer initialized properly
     if not st.session_state.analyzer.initialized:
@@ -244,101 +246,106 @@ def main():
             
             # Performance warning for large videos
             if frame_count > 1000:
-                st.warning(f"⚠️ Large video detected ({frame_count} frames). Consider processing every Nth frame for better performance.")
+                st.warning(f"⚠️ Large video detected ({frame_count} frames). Be selective with analysis.")
             
             # Frame navigation
-            st.subheader("🎬 Frame Navigation")
+            st.subheader("🎬 Frame Navigation & Analysis")
             
-            # Current frame selector
-            if 'current_frame' not in st.session_state:
-                st.session_state.current_frame = 0
-            
-            current_frame = st.slider(
-                "Current Frame",
+            # Current frame selector for navigation
+            current_frame_to_display = st.slider(
+                "Select Frame to View",
                 min_value=0,
                 max_value=frame_count-1,
-                value=st.session_state.current_frame,
-                help="Navigate through video frames"
+                value=st.session_state.current_frame_to_analyze,
+                help="Navigate through video frames without processing"
             )
-            
-            st.session_state.current_frame = current_frame
+            st.session_state.current_frame_to_analyze = current_frame_to_display
             
             # Navigation controls
             col1, col2, col3, col4, col5, col6 = st.columns(6)
             
             with col1:
                 if st.button("⏮️ Start"):
-                    st.session_state.current_frame = 0
+                    st.session_state.current_frame_to_analyze = 0
                     st.rerun()
             
             with col2:
                 if st.button("⏪ -10"):
-                    st.session_state.current_frame = max(0, st.session_state.current_frame - 10)
+                    st.session_state.current_frame_to_analyze = max(0, st.session_state.current_frame_to_analyze - 10)
                     st.rerun()
             
             with col3:
                 if st.button("⏪ -1"):
-                    st.session_state.current_frame = max(0, st.session_state.current_frame - 1)
+                    st.session_state.current_frame_to_analyze = max(0, st.session_state.current_frame_to_analyze - 1)
                     st.rerun()
             
             with col4:
                 if st.button("⏩ +1"):
-                    st.session_state.current_frame = min(frame_count-1, st.session_state.current_frame + 1)
+                    st.session_state.current_frame_to_analyze = min(frame_count-1, st.session_state.current_frame_to_analyze + 1)
                     st.rerun()
             
             with col5:
                 if st.button("⏩ +10"):
-                    st.session_state.current_frame = min(frame_count-1, st.session_state.current_frame + 10)
+                    st.session_state.current_frame_to_analyze = min(frame_count-1, st.session_state.current_frame_to_analyze + 10)
                     st.rerun()
             
             with col6:
                 if st.button("⏭️ End"):
-                    st.session_state.current_frame = frame_count-1
+                    st.session_state.current_frame_to_analyze = frame_count-1
                     st.rerun()
-            
-            # Process current frame
-            col1, col2 = st.columns([3, 1])
-            
-            with col1:
+
+            # Button to trigger analysis for the currently selected frame
+            if st.button("📐 Analyze This Frame", use_container_width=True):
                 # Check if frame is already processed
-                if current_frame not in st.session_state.angle_data:
-                    with st.spinner("Processing frame..."):
-                        frame = st.session_state.analyzer.get_frame_at_position(st.session_state.video_path, current_frame)
+                if current_frame_to_display not in st.session_state.angle_data:
+                    with st.spinner(f"Processing frame {current_frame_to_display}..."):
+                        frame_to_process = st.session_state.analyzer.get_frame_at_position(st.session_state.video_path, current_frame_to_display)
                         
-                        if frame is not None:
-                            annotated_frame, left_angle, right_angle = st.session_state.analyzer.process_frame(frame)
+                        if frame_to_process is not None:
+                            annotated_frame, left_angle, right_angle = st.session_state.analyzer.process_frame(frame_to_process)
                             
-                            # Store processed data
-                            st.session_state.angle_data[current_frame] = {
+                            # Store processed data in the session state cache
+                            st.session_state.angle_data[current_frame_to_display] = {
                                 'annotated_frame': annotated_frame,
                                 'left_angle': left_angle,
                                 'right_angle': right_angle
                             }
                         else:
-                            st.error(f"Could not read frame {current_frame}")
-                
-                # Display frame
-                if current_frame in st.session_state.angle_data:
-                    frame_data = st.session_state.angle_data[current_frame]
-                    current_time = current_frame / fps if fps > 0 else 0
-                    
+                            st.error(f"Could not read frame {current_frame_to_display}")
+                    st.success(f"✅ Frame {current_frame_to_display} analyzed and angles stored!")
+            
+            # --- Display section ---
+            col1, col2 = st.columns([3, 1])
+            
+            with col1:
+                # Display the video frame
+                frame_to_display = st.session_state.analyzer.get_frame_at_position(st.session_state.video_path, current_frame_to_display)
+                if frame_to_display is not None:
+                    # Check if the frame has been processed and display the annotated version
+                    if current_frame_to_display in st.session_state.angle_data:
+                        annotated_frame = st.session_state.angle_data[current_frame_to_display]['annotated_frame']
+                    else:
+                        # Otherwise, just show the raw frame
+                        annotated_frame = cv2.cvtColor(frame_to_display, cv2.COLOR_BGR2RGB)
+
+                    current_time = current_frame_to_display / fps if fps > 0 else 0
                     st.image(
-                        frame_data['annotated_frame'],
-                        caption=f"Frame {current_frame} | Time: {current_time:.3f}s",
+                        annotated_frame,
+                        caption=f"Frame {current_frame_to_display} | Time: {current_time:.3f}s",
                         use_column_width=True
                     )
-            
+                
             with col2:
                 st.subheader("📐 Elbow Angles")
                 
                 # Current frame info
-                current_time = current_frame / fps if fps > 0 else 0
+                current_time = current_frame_to_display / fps if fps > 0 else 0
                 st.metric("Current Time", f"{current_time:.3f}s")
-                st.metric("Frame Number", current_frame)
+                st.metric("Frame Number", current_frame_to_display)
                 
-                # Display angles if available
-                if current_frame in st.session_state.angle_data:
-                    frame_data = st.session_state.angle_data[current_frame]
+                # Display angles if available from the cache
+                if current_frame_to_display in st.session_state.angle_data:
+                    frame_data = st.session_state.angle_data[current_frame_to_display]
                     
                     # Left elbow angle
                     if frame_data['left_angle'] is not None:
@@ -359,6 +366,8 @@ def main():
                         )
                     else:
                         st.warning("Right elbow not detected")
+                else:
+                    st.info("Click 'Analyze This Frame' to see angles.")
                 
                 # Angle interpretation guide
                 with st.expander("📊 Angle Guide"):
@@ -372,87 +381,11 @@ def main():
                     *Angles closer to 0° indicate maximum flexion*
                     """)
                 
-                # Batch processing option
-                st.subheader("⚡ Batch Processing")
-                
-                # Processing options
-                processing_step = st.selectbox(
-                    "Process Every Nth Frame",
-                    [1, 5, 10, 30],
-                    index=2,
-                    help="Higher values = faster processing, fewer data points"
-                )
-                
-                if st.button("🔄 Process Frames", use_container_width=True):
-                    progress_bar = st.progress(0)
-                    status_text = st.empty()
-                    
-                    # Calculate frames to process
-                    frames_to_process = list(range(0, frame_count, processing_step))
-                    total_frames = len(frames_to_process)
-                    
-                    for i, frame_num in enumerate(frames_to_process):
-                        if frame_num not in st.session_state.angle_data:
-                            frame = st.session_state.analyzer.get_frame_at_position(st.session_state.video_path, frame_num)
-                            
-                            if frame is not None:
-                                annotated_frame, left_angle, right_angle = st.session_state.analyzer.process_frame(frame)
-                                
-                                st.session_state.angle_data[frame_num] = {
-                                    'annotated_frame': annotated_frame,
-                                    'left_angle': left_angle,
-                                    'right_angle': right_angle
-                                }
-                        
-                        # Update progress
-                        progress = (i + 1) / total_frames
-                        progress_bar.progress(progress)
-                        status_text.text(f"Processing frame {frame_num}/{frame_count} ({i+1}/{total_frames})")
-                    
-                    progress_bar.progress(1.0)
-                    status_text.text("✅ Processing complete!")
-                
-                # Export data
-                if st.session_state.angle_data:
-                    st.subheader("📊 Export Data")
-                    
-                    if st.button("📥 Prepare Export Data", use_container_width=True):
-                        # Create export data
-                        export_data = []
-                        for frame_num in sorted(st.session_state.angle_data.keys()):
-                            data = st.session_state.angle_data[frame_num]
-                            export_data.append({
-                                'frame': frame_num,
-                                'time_seconds': frame_num / fps if fps > 0 else 0,
-                                'left_elbow_angle': data['left_angle'],
-                                'right_elbow_angle': data['right_angle']
-                            })
-                        
-                        # Create CSV content
-                        export_text = "Frame,Time(s),Left_Elbow,Right_Elbow\n"
-                        for data in export_data:
-                            left_angle = f"{data['left_elbow_angle']:.1f}" if data['left_elbow_angle'] is not None else "N/A"
-                            right_angle = f"{data['right_elbow_angle']:.1f}" if data['right_elbow_angle'] is not None else "N/A"
-                            export_text += f"{data['frame']},{data['time_seconds']:.3f},{left_angle},{right_angle}\n"
-                        
-                        # Store in session state for download
-                        st.session_state.export_data = export_text
-                        st.success(f"✅ Export data prepared! {len(export_data)} frames ready.")
-                    
-                    # Download button
-                    if 'export_data' in st.session_state:
-                        st.download_button(
-                            label="📁 Download CSV File",
-                            data=st.session_state.export_data,
-                            file_name=f"elbow_angles_{uploaded_file.name}.csv",
-                            mime="text/csv",
-                            use_container_width=True
-                        )
-                        
-                        # Preview data
-                        with st.expander("👀 Preview Export Data"):
-                            st.text(st.session_state.export_data[:500] + "..." if len(st.session_state.export_data) > 500 else st.session_state.export_data)
-        
+            # Button to clear the analysis cache
+            if st.button("🗑️ Clear Analysis Cache", use_container_width=True):
+                st.session_state.angle_data = {}
+                st.success("✅ Analysis cache cleared!")
+
         except Exception as e:
             st.error(f"Error processing video: {str(e)}")
             st.info("💡 Try uploading a different video file or refresh the page.")
@@ -463,10 +396,8 @@ def main():
         ### 📋 How to Use:
         
         1. **📤 Upload Video**: Choose any video file with visible arm movements
-        2. **🎬 Navigate Frames**: Use slider and controls to move through the video
-        3. **📐 View Angles**: See real-time left and right elbow angles
-        4. **⚡ Batch Process**: Analyze multiple frames for complete dataset
-        5. **📊 Export Data**: Download angle measurements as CSV file
+        2. **🎬 Navigate Frames**: Use the slider and controls to move through the video
+        3. **📐 Analyze Frames**: Click **Analyze This Frame** to get elbow angles
         
         ### 🎯 Best Results:
         - **Clear view** of both arms in the video
